@@ -1,0 +1,5 @@
+# Don't push data to github
+data/
+
+# Don't add environment
+env/
