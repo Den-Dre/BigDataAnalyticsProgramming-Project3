@@ -13,8 +13,8 @@ import numpy as np
 
 copt =  {
     "msvc": ["/Ox", "/Og"],
-    "mingw32" : ["-O3", "-march=native"],
-    "unix" : ["-O3", "-march=native", "-std=c++11"],
+    "mingw32" : ["-O0", "-march=native"],  # O3
+    "unix" : ["-O0", "-march=native", "-std=c++11"],  # 03
 }
 lopt = {
     "mingw32" : ["-lstdc++"],

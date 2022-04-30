@@ -163,7 +163,15 @@ namespace bdap {
         // Implement them in 'prod_quan_nn.cpp'
         //
         // ========================================================================
-        void print_vector(const float *example_ptr, size_t ncols) const;
+        static void print_vector(const float *example_ptr, size_t ncols) ;
+
+        static void print_vector(const double *example_ptr, size_t ncols) ;
+
+        static double distanceToCentroid(const float *example, const Partition &partition, size_t cIdx);
+
+        void calculateDistances(const pydata<float>& examples, const float* example, std::vector<std::vector<double>> distances) const;
+
+        static void print2DVector(const std::vector<std::vector<double>>& distances) ;
     };
 
 
