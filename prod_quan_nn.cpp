@@ -18,6 +18,7 @@
 
 // Self-added:
 #include <bits/stdc++.h>
+#include <tuple>
 
 using namespace std;
 
@@ -32,6 +33,11 @@ namespace bdap {
     ProdQuanNN::initialize_method()
     {
         //std::cout << "Construct auxiliary structures here" << std::endl;
+    }
+    bool sortbysec(const tuple<float, int>& a,
+                   const tuple<float, int>& b)
+    {
+        return (get<1>(a) < get<1>(b));
     }
 
     void
@@ -57,7 +63,7 @@ namespace bdap {
         // TODO convert to class members?
         const float *example;
         // -1 As we exclude to distance from a vector to itself:
-        vector<float> distancesToExample(examples.nrows-1);
+        vector<tuple<float, int>> distancesToExample(examples.nrows-1);
         vector<vector<float>> distancesToCentroids(this->npartitions(), vector<float>(this->nclusters(0)));
 
         // For each example
@@ -76,20 +82,26 @@ namespace bdap {
              */
             getDistancesToExample(examples, i, distancesToCentroids, distancesToExample);
 
+            // TODO use a priority queue instead of a vector?
             // Sort the distances to find the `nneighbours` nearest neighbours
-            // TODO use a priority queue rather than a vector?
+            // Sorted on first element of each tuple, i.e.: the distance
             sort(distancesToExample.begin(), distancesToExample.end());
 
             // Update the output pointers
-            float value;
             for (int j = 0; j < nneighbors; j++) {
-                value = distancesToExample[j];
-                *out_distance.ptr_mut(i, j) = value;
+                *out_distance.ptr_mut(i, j) = get<0>(distancesToExample[j]);
+                *out_index.ptr_mut(i, j) = get<1>(distancesToExample[j]);
             }
-            cout << nneighbors << " Nearest neighbours of\t" << *example <<": \t";
-            for (int idx = 0; idx < nneighbors; idx++) cout << distancesToExample[idx] << ", ";
-            cout << "\n";
-
+            cout << nneighbors << " Nearest neighbours of [" << *example <<", ...]: \t";
+            for (int idx = 0; idx < nneighbors; idx++)
+                cout << "<" << get<0>(distancesToExample[idx])
+                        << ", " << get<1>(distancesToExample[idx]) << ">";
+            cout << endl;
+//            cout << std::endl << "Sorted points:" << std::endl;
+//            sort(distancesToExample.begin(), distancesToExample.end(), sortbysec);
+//            for (auto val: distancesToExample)
+//                cout << "<" << get<0>(val) << ", " << get<1>(val) << ">" << std::endl;
+//            break;
         }
 
     }
@@ -115,7 +127,7 @@ namespace bdap {
         }
     }
 
-    void ProdQuanNN::getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroids, std::vector<float>& distances) const {
+    void ProdQuanNN::getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroids, std::vector<std::tuple<float, int>>& distances) const {
         float distanceAcc;
         int closestCentroid;
 
@@ -132,7 +144,7 @@ namespace bdap {
                 distanceAcc += distancesToCentroids.at(p).at(closestCentroid);
             }
             // Offset by one if we have passed index `i`
-            distances.at(e > i ? e-1 : e) = distanceAcc;
+            distances.at(e > i ? e-1 : e) = make_tuple(distanceAcc, e);
         }
     }
 

@@ -41,6 +41,7 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
         distances[row_idx] = [-tup[1] for tup in pq]
         # https://stackoverflow.com/a/12974504/15482295
         # indices[row_idx], distances[row_idx] = [list(x) for x in zip(*pq)]  # minus must still be added...
+    print(distances[:k+1])
     return indices, distances
 
 

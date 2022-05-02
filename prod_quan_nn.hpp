@@ -16,6 +16,9 @@
 
 #include "pydata.hpp"
 
+// self-added
+#include <tuple>
+
 #ifndef PROD_QUAN_NN_GUARD
 #define PROD_QUAN_NN_GUARD 1
 
@@ -169,7 +172,7 @@ namespace bdap {
 
         void calculateDistancesToCentroids(const pydata<float>& examples, const float* example, std::vector<std::vector<float>>& distances) const;
 
-        void getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroid, std::vector<float>& distances) const;
+        void getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroid, std::vector<std::tuple<float, int>>& distances) const;
 
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
     };
