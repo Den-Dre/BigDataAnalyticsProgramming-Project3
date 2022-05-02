@@ -165,11 +165,11 @@ namespace bdap {
         // ========================================================================
         static void print_vector(const float *example_ptr, size_t ncols) ;
 
-        static void print_vector(const double *example_ptr, size_t ncols) ;
+        static float distanceToCentroid(const float *example, const Partition &partition, size_t cIdx);
 
-        static double distanceToCentroid(const float *example, const Partition &partition, size_t cIdx);
+        void calculateDistancesToCentroids(const pydata<float>& examples, const float* example, std::vector<std::vector<float>>& distances) const;
 
-        void calculateDistances(const pydata<float>& examples, const float* example, std::vector<std::vector<double>> distances) const;
+        void getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroid, std::vector<float>& distances) const;
 
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
     };
