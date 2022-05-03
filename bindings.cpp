@@ -241,7 +241,7 @@ extern "C" {
         int j = is_valid_cluster_index(self, i, pyj);
         if (j == -1) return NULL;
 
-        npy_long sz = self->pqnn.partition(i).centroids.ncols;
+        npy_intp sz = self->pqnn.partition(i).centroids.ncols;
         PyObject *arr = PyArray_SimpleNew(1, &sz, NPY_FLOAT32);
         if (arr == NULL) { return PyErr_NoMemory(); }
         float *dst = (float *) PyArray_DATA(arr);
@@ -256,7 +256,7 @@ extern "C" {
         int i = is_valid_partition_index(self, pyi);
         if (i == -1) return NULL;
 
-        npy_long nex = self->pqnn.ntrain_examples();
+        npy_intp nex = self->pqnn.ntrain_examples();
         if (nex == 0) {
             PyErr_SetString(PyExc_ValueError, "Empty ProdQuanNN");
             return NULL;
@@ -297,7 +297,7 @@ extern "C" {
 
         auto examples = get_data<float>((PyArrayObject *) pyexamples);
 
-        npy_long dims[2] {(npy_long) examples.nrows, k};
+        npy_intp dims[2] {(npy_intp) examples.nrows, k};
         PyObject *arr_index = PyArray_ZEROS(2, dims, NPY_INT32, 0);
         if (arr_index == NULL) { return PyErr_NoMemory(); }
         PyObject *arr_distance = PyArray_ZEROS(2, dims, NPY_FLOAT32, 0);
@@ -337,6 +337,9 @@ extern "C" {
         {NULL}  /* Sentinel */
     };
 
+
+    /*
+    // does not work with MSVC
     static PyTypeObject PyProdQuanNNType = {
         PyVarObject_HEAD_INIT(NULL, 0)
         .tp_name = "prod_quan_nn.ProdQuanNN",
@@ -347,6 +350,103 @@ extern "C" {
         .tp_init = (initproc) PyProdQuanNNInit,
         .tp_new = PyProdQuanNNNew,
         //.tp_repr = (reprfunc)myobj_repr,
+    };
+    */
+
+    static PyTypeObject PyProdQuanNNType = {
+        PyVarObject_HEAD_INIT(NULL, 0)
+        "prod_quan_nn.ProdQuanNN", //const char *tp_name; /* For printing, in format "<module>.<name>" */
+        sizeof(PyProdQuanNNObject), 0, //Py_ssize_t tp_basicsize, tp_itemsize; /* For allocation */
+
+        /* Methods to implement standard operations */
+
+        (destructor)PyProdQuanNNDealloc, //destructor tp_dealloc;
+        0, //Py_ssize_t tp_vectorcall_offset;
+        NULL, //getattrfunc tp_getattr;
+        NULL, //setattrfunc tp_setattr;
+        NULL, //PyAsyncMethods *tp_as_async; /* formerly known as tp_compare (Python 2)
+        //                                or tp_reserved (Python 3) */
+        NULL, //reprfunc tp_repr;
+
+        ///* Method suites for standard classes */
+
+        NULL, //PyNumberMethods *tp_as_number;
+        NULL, //PySequenceMethods *tp_as_sequence;
+        NULL, //PyMappingMethods *tp_as_mapping;
+
+        ///* More standard operations (here for binary compatibility) */
+
+        NULL, //hashfunc tp_hash;
+        NULL, //ternaryfunc tp_call;
+        NULL, //reprfunc tp_str;
+        NULL, //getattrofunc tp_getattro;
+        NULL, //setattrofunc tp_setattro;
+
+        ///* Functions to access object as input/output buffer */
+        NULL, //PyBufferProcs *tp_as_buffer;
+
+        ///* Flags to define presence of optional/expanded features */
+        0, //unsigned long tp_flags;
+
+        "ProdQuanNN C++ type", //const char *tp_doc; /* Documentation string */
+
+        ///* Assigned meaning in release 2.0 */
+        ///* call function for all accessible objects */
+        NULL, //traverseproc tp_traverse;
+
+        ///* delete references to contained objects */
+        NULL, //inquiry tp_clear;
+
+        ///* Assigned meaning in release 2.1 */
+        ///* rich comparisons */
+        NULL, //richcmpfunc tp_richcompare;
+
+        ///* weak reference enabler */
+        0, //Py_ssize_t tp_weaklistoffset;
+
+        ///* Iterators */
+        NULL, //getiterfunc tp_iter;
+        NULL, //iternextfunc tp_iternext;
+
+        ///* Attribute descriptor and subclassing stuff */
+        ProdQuanNN_methods, //struct PyMethodDef *tp_methods;
+        NULL, //struct PyMemberDef *tp_members;
+        NULL, //struct PyGetSetDef *tp_getset;
+        NULL, //struct _typeobject *tp_base;
+        NULL, //PyObject *tp_dict;
+        NULL, //descrgetfunc tp_descr_get;
+        NULL, //descrsetfunc tp_descr_set;
+        0, //Py_ssize_t tp_dictoffset;
+        (initproc) PyProdQuanNNInit, //initproc tp_init;
+        NULL, //allocfunc tp_alloc;
+        PyProdQuanNNNew, //newfunc tp_new;
+        NULL, //freefunc tp_free; /* Low-level free-memory routine */
+        NULL, //inquiry tp_is_gc; /* For PyObject_IS_GC */
+        NULL, //PyObject *tp_bases;
+        NULL, //PyObject *tp_mro; /* method resolution order */
+        NULL, //PyObject *tp_cache;
+        NULL, //PyObject *tp_subclasses;
+        NULL, //PyObject *tp_weaklist;
+        NULL, //destructor tp_del;
+
+        // Python 3.7, 3.8 fix,
+        // from https://github.com/JonathanSalwan/Triton/blob/84c93860020cea65394d0355fde886f3e18bd55c/src/libtriton/bindings/python/objects/pyAstContext.cpp#L1769
+        0,                                        /* unsigned int tp_version_tag */
+        NULL,                                     /* tp_finalize */
+        #if PY_MINOR_VERSION >= 8
+          NULL,                                   /* vectorcallfunc tp_vectorcall */
+          #if PY_MINOR_VERSION == 8
+            0,                                    /* bpo-37250: kept for backwards compatibility in CPython 3.8 only */
+          #endif                                  /* https://github.com/python/cpython/blob/d35af52caae844cb4ea0aff06fa3fc5328708af1/Include/cpython/object.h#L260 */
+        #endif
+
+        /* // BELOW works for Python 3.9
+        // Type attribute cache version tag. Added in version 2.6
+        0, //unsigned int tp_version_tag;
+
+        NULL, //destructor tp_finalize;
+        NULL, //vectorcallfunc tp_vectorcall;
+        */
     };
 
     static PyMethodDef ProdQuanNN_static[] = {
