@@ -85,6 +85,9 @@ namespace bdap {
         //
         // ========================================================================
 
+//        std::vector<std::vector<float>> distancesToCentroids;
+//        std::vector<std::tuple<float, int>> distancesToExample;
+
     public:
         /**
          * Constructor. Implemented for you in 'prod_quan_nn.cpp'.
@@ -168,13 +171,19 @@ namespace bdap {
         // ========================================================================
         static void print_vector(const float *example_ptr, size_t ncols) ;
 
-        static float distanceToCentroid(const float *example, const Partition &partition, size_t cIdx);
+        static float distanceToCentroid(const float *example, const Partition &partition, const float* centroid);
 
-        void calculateDistancesToCentroids(const pydata<float>& examples, const float* example, std::vector<std::vector<float>>& distances) const;
+        void calculateDistancesToCentroids(const pydata<float>& examples,
+                                           const float* example,
+                                           std::vector<std::vector<float>>& distances) const;
 
-        void getDistancesToExample(const pydata<float>& examples, size_t i, const std::vector<std::vector<float>>& distancesToCentroid, std::vector<std::tuple<float, int>>& distances) const;
+        void getDistancesToExample(const pydata<float> &examples,
+                                   const std::vector<std::vector<float>> &distancesToCentroids,
+                                   std::vector<std::tuple<float, int>> &distances) const;
 
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
+
+        static void printTupleVector(const std::vector<std::tuple<float, int>>& distances) ;
     };
 
 

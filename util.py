@@ -3,6 +3,8 @@ from sklearn.model_selection import train_test_split
 
 from nn import *
 
+from csv import writer
+
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = "data" # relative to BASE_DIR, dir of this file
 
@@ -53,10 +55,17 @@ def load_dataset(dataset):
         sys.exit(2)
 
     x, y = x.astype(np.float32), y.astype(int)
+    # save_to_csv(dataset, x, y)
     xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.2,
             random_state=0)
 
     return xtrain, xtest, ytrain, ytest
+
+def save_to_csv(filename, x, y):
+    with open(f'data/{filename}.csv', 'w') as f:
+        for features, classif in zip(x, y):
+            f.write(np.array2string(features, separator=',', max_line_width=1000) + ', ' + str(classif) + '\n')
+
 
 def sample_xtest(xtest, ytest, n, seed):
     rng = np.random.default_rng(seed)
