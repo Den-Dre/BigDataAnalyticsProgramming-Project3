@@ -85,8 +85,8 @@ namespace bdap {
         //
         // ========================================================================
 
-//        std::vector<std::vector<float>> distancesToCentroids;
-//        std::vector<std::tuple<float, int>> distancesToExample;
+//        std::vector<std::vector<float>>& distancesToCentroids;
+//        std::vector<std::tuple<float, int>>& distancesToExample;
 
     public:
         /**
@@ -169,7 +169,7 @@ namespace bdap {
         // Implement them in 'prod_quan_nn.cpp'
         //
         // ========================================================================
-        static void print_vector(const float *example_ptr, size_t ncols) ;
+        static void print_vector(const float *example_ptr, const pydata<float>& examples, int nneighbors) ;
 
         static float distanceToCentroid(const float *example, const Partition &partition, const float* centroid);
 

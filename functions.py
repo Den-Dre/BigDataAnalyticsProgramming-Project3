@@ -7,6 +7,7 @@
 #                                                                             #
 ###############################################################################
 import logging
+from collections import Counter
 from time import time
 from heapq import heappush, heapreplace
 from statistics import mode
@@ -54,8 +55,12 @@ def compute_accuracy(ytrue, ypredicted):
     """
     cnt = 0
     for x, y in zip(ytrue, ypredicted):
-        if x == mode(y):  # mode == most frequent prediction
+        # Predict the most occurring class among the neighbors:
+        print(f'x: {x}, y: {y}')
+        if Counter(y)[x] >= len(y) / 2:
             cnt += 1
+        # if x == mode(y):  # mode == most frequent prediction--task retrieval
+        #     cnt += 1
     acc = cnt / len(ytrue)
     return acc
 
@@ -86,7 +91,7 @@ def time_and_accuracy_task(dataset, k, n, seed):
         indices, dist = nn.get_neighbors(xsample, k)
         times[str_nn] = time() - start_time
         print(f'{str_nn}: {indices}')
-        print(f'{str_nn}: {dist}')
+        # print(f'{str_nn}: {dist}')
 
         predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
         accuracies[str_nn] = compute_accuracy(ysample, predicted_labels)
@@ -109,7 +114,8 @@ def distance_absolute_error_task(dataset, k, n, seed):
     _, distances_pqnn = pqnn.get_neighbors(xsample, k=k)
     _, distances_sknn = sknn.get_neighbors(xsample, k=k)
 
-    mean_abs_dist = np.sum(np.absolute(distances_sknn - distances_pqnn)) / distances_pqnn.size
+    # mean_abs_dist = np.sum(np.absolute(distances_sknn - distances_pqnn)) / distances_pqnn.size
+    mean_abs_dist = np.mean(np.absolute(distances_sknn - distances_pqnn))
 
     return mean_abs_dist
 
@@ -127,24 +133,31 @@ def retrieval_task(dataset, k, n, seed):
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
-    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True)
+    pqnn, npnn, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True, nclusters=8, npartitions=4)
 
-    _, distances_sknn = sknn.get_neighbors(xsample)
-    _, distances_pqnn = pqnn.get_neighbors(xsample, k)
+    indices_sknn, distances_sknn = sknn.get_neighbors(xsample)
+    indices_pqnn, _ = pqnn.get_neighbors(xsample, k)
 
     retrieval_rate = 0.0
 
-    for sknn_neighbor, pqnn_neighbors in zip(distances_sknn, distances_pqnn):
-        for pqnn_n in pqnn_neighbors:
-            if sknn_neighbor[0] == pqnn_n:
-                retrieval_rate += 1
-                print('Match with: ', sknn_neighbor)
-                break
+    for ti_idx, ti in enumerate(xsample):
+        # calculate the *exact* distances of the k-NN returned by pqnn
+        exact_pqnn_distances = [np.linalg.norm(ti - xtrain[i]) for i in indices_pqnn[ti_idx]]
+        if distances_sknn[ti_idx][0] in exact_pqnn_distances:
+            # "Important note: neighbors with the exact same distance to the test instance
+            # are considered the same!", thus we add at most 1 to the retrieval rate count:
+            retrieval_rate += 1
+
+
+    # old, incorrect interpretation
+    # for sknn_neighbor, pqnn_neighbors in zip(indices_sknn, indices_pqnn):
+    #     if sknn_neighbor[0] in pqnn_neighbors:
+    #         retrieval_rate += 1
 
     # retrieval_rate = 1.0  # all present in top-k of ProdQuanNN
     # retrieval_rate = 0.0  # none present in top-k of ProdQuanNN
 
-    retrieval_rate /= distances_pqnn.shape[0]
+    retrieval_rate /= indices_pqnn.shape[0]
     return retrieval_rate
 
 
@@ -162,7 +175,6 @@ def hyperparam_task(dataset, k, n, seed):
     the hyper-parameter optimization and produce the plots. Feel free to add
     additional helper functions if you want, but keep them all in this file.
     """
-    import matplotlib.pyplot as plt
     from util import PROD_QUAN_SETTINGS
 
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
@@ -179,33 +191,45 @@ def hyperparam_task(dataset, k, n, seed):
     nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
 
     times = {}
+    accuracies = {}
     logger = logging.getLogger()
 
     for npartitions in npartitions_vals:
         for nclusters in nclusters_vals:
             print(f'Using {npartitions} partitions and {nclusters} clusters... ')
             start_time = time()
-            try:  # TODO fix this
+            try:  # TODO fix this: this fails when n is not sufficiently large
                 pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
             except ValueError as e:
                 logger.error(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
                 continue
+
             elapsed_time = time() - start_time
-            if npartitions in times.keys():
+            indices, _ = pqnn.get_neighbors(xsample, k)
+            predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
+
+            if npartitions in times:
                 times[npartitions][nclusters] = elapsed_time
+                accuracies[npartitions][nclusters] = compute_accuracy(ysample, predicted_labels)
             else:
                 times[npartitions] = {nclusters: elapsed_time}
+                accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
 
+    plot_dict(times, 'Execution time')
+    plot_dict(accuracies, 'Accuracy')
+
+    # TODO optimize the hyper parameters of ProdQuanNN and produce plot
+
+
+def plot_dict(dict, ylabel):
     _, ax = plt.subplots()
-    for npartitions in times.keys():
-        ax.plot(times[npartitions].keys(), times[npartitions].values(), label=f'{npartitions} partitions')
-    plt.title('Execution time in function of number of clusters')
-    plt.ylabel('Execution time (s)')
+    for npartitions in dict.keys():
+        ax.plot(dict[npartitions].keys(), dict[npartitions].values(), label=f'{npartitions} partitions')
+    plt.title(f'{ylabel} in function of number of clusters')
+    plt.ylabel(f'{ylabel} (s)')
     plt.xlabel('Number of clusters')
     plt.legend()
     plt.show()
-
-    # TODO optimize the hyper parameters of ProdQuanNN and produce plot
 
 
 def plot_task(dataset, k, n, seed):

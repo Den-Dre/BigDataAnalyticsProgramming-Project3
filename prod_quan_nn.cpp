@@ -48,40 +48,30 @@ namespace bdap {
                 pydata<int>& out_index,
                 pydata<float>& out_distance) const
     {
-        std::cout << "Compute the " << nneighbors << " nearest neighbors for the "
-            << examples.nrows
-            << " given examples." << std::endl
 
-            << "The examples are given in C-style row-major order, that is," << std::endl
-            << "the values of a row are consecutive in memory." << std::endl
-
-            << "The 5th example can be fetched as follows:" << std::endl;
-
-        print_vector(examples.ptr(5, 0), examples.ncols);
+        print_vector(examples.ptr(5, 0), examples, nneighbors);
 
         // TODO use array?
         // TODO convert to class members?
 
-        const float *example;
-
         // Data structures initialisation
 
-        // nrows-1 As we exclude to distance from a vector to itself:
-        // distancesToCentroids[p][c] is the distance from the test example to cluster `c` in partition `p`
+        // distancesToCentroids[p][c] is the distance from the test example of this iteration to cluster `c` of partition `p`
         vector<vector<float>> distancesToCentroids(this->npartitions(), vector<float>(this->nclusters(0)));
 
-        // distancesToExample[e] is the approximate distance of the test example to train example `e`
+        // distancesToExample[e] is the approximate distance of the current test example to train example `e`
         vector<tuple<float, int>> distancesToExample(this->ntrain_examples());
 
         // For each test example
         for (size_t i = 0; i < examples.nrows; i++) {
-            example = examples.ptr(i, 0);
+            const float *example = examples.ptr(i, 0);
             // https://mccormickml.com/2017/10/13/product-quantizer-tutorial-part-1/
             // "First, we’re going to calculate the squared L2 distance between each subsection of
             // our vector and each of the 256 centroids for that subsection."
             // Get the distancesToCentroids of `example` to each centroid within each of its partitions
             calculateDistancesToCentroids(examples, example, distancesToCentroids);
 //            print2DVector(distancesToCentroids);
+
             /*
              * Remember that each database vector is now just a sequence of 8 centroid ids.
              * To calculate the approximate distance between a given database vector and the query vector,
@@ -93,19 +83,13 @@ namespace bdap {
             // Sort the distances to find the `nneighbours` nearest neighbours
             // Sorted on first element of each tuple, i.e.: the distance
             sort(distancesToExample.begin(), distancesToExample.end());
-            printTupleVector(distancesToExample);
+//            printTupleVector(distancesToExample);
 
             // Update the output pointers
             for (int j = 0; j < nneighbors; j++) {
-                *out_distance.ptr_mut(i, j) = get<0>(distancesToExample[j]);
-                *out_index.ptr_mut(i, j) = get<1>(distancesToExample[j]);
+                *out_distance.ptr_mut(i, j) = get<0>(distancesToExample.at(j));
+                *out_index.ptr_mut(i, j) = get<1>(distancesToExample.at(j));
             }
-
-//            cout << nneighbors << " Nearest neighbours of [" << *example <<", ...]: \t";
-//            for (int idx = 0; idx < nneighbors; idx++)
-//                cout << "<" << get<0>(distancesToExample[idx])
-//                        << ", " << get<1>(distancesToExample[idx]) << ">";
-//            cout << endl;
         }
     }
 
@@ -117,7 +101,8 @@ namespace bdap {
         return distance;
     }
 
-    // Returns a vector `distances`, where distances[p][c] is the distance of `example` to cluster `c` in partition `p`
+    // Returns a vector `distances`, where distances[p][c] is the distance of
+    // training example `example` to cluster `c` in partition `p`
     void ProdQuanNN::calculateDistancesToCentroids(const pydata<float>& examples,
                                                    const float* example,
                                                    std::vector<std::vector<float>>& distances) const {
@@ -126,7 +111,8 @@ namespace bdap {
         for (size_t p = 0; p < this->npartitions(); p++) {
             const Partition& partition = this->partition(p);
             for (int c = 0; c < partition.nclusters; c++) {
-                const float* centroid = partition.centroids.ptr(c, 0);
+//                const float* centroid = partition.centroids.ptr(c, 0);
+                const float* centroid = this->centroid(p, c);
                 distances.at(p).at(c) = distanceToCentroid(example, partition, centroid);
             }
         }
@@ -148,6 +134,8 @@ namespace bdap {
         }
     }
 
+    // Utilitarian and debugging methods
+
     void ProdQuanNN::print2DVector(const std::vector<std::vector<double>>& distances) {
         for (auto & distance : distances) {
             for (double value : distance) {
@@ -165,9 +153,17 @@ namespace bdap {
         cout << "\n";
     }
 
-    void ProdQuanNN::print_vector(const float *ptr, size_t ncols) {
+    void ProdQuanNN::print_vector(const float *ptr, const pydata<float>& examples, const int nneighbors) {
+        std::cout << "Compute the " << nneighbors << " nearest neighbors for the "
+                  << examples.nrows
+                  << " given examples." << std::endl
+
+                  << "The examples are given in C-style row-major order, that is," << std::endl
+                  << "the values of a row are consecutive in memory." << std::endl
+
+                  << "The 5th example can be fetched as follows:" << std::endl;
         std::cout << '[';
-        for (size_t i = 0; i < ncols; ++i) {
+        for (size_t i = 0; i < examples.ncols; ++i) {
             if (i>0) std::cout << ",";
             if (i>0 && i%5==0) std::cout << std::endl << ' ';
             printf("%11f", ptr[i]);
