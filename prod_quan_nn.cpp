@@ -49,7 +49,7 @@ namespace bdap {
                 pydata<float>& out_distance) const
     {
 
-        print_vector(examples.ptr(5, 0), examples, nneighbors);
+//        print_vector(examples.ptr(5, 0), examples, nneighbors);
 
         // TODO use array?
         // TODO convert to class members?

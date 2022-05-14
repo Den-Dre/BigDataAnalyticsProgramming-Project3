@@ -7,16 +7,19 @@
 #                                                                             #
 ###############################################################################
 import logging
+import pickle
 from collections import Counter
-from time import time
 from heapq import heappush, heapreplace
-from statistics import mode
+from time import time
+from os.path import join, dirname
+from pickle import dump, HIGHEST_PROTOCOL
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 import util
 
+RESULTS_DIR = join(dirname(__file__), 'results')
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
@@ -56,10 +59,10 @@ def compute_accuracy(ytrue, ypredicted):
     cnt = 0
     for x, y in zip(ytrue, ypredicted):
         # Predict the most occurring class among the neighbors:
-        print(f'x: {x}, y: {y}')
+        # print(f'x: {x}, y: {y}')
         if Counter(y)[x] >= len(y) / 2:
             cnt += 1
-        # if x == mode(y):  # mode == most frequent prediction--task retrieval
+        # if x == mode(y):  # mode == most frequent prediction
         #     cnt += 1
     acc = cnt / len(ytrue)
     return acc
@@ -75,8 +78,7 @@ def time_and_accuracy_task(dataset, k, n, seed):
     """
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
-    nns = util.get_nn_instances(dataset, xtrain, ytrain,
-                                             cache_partitions=True)
+    nns = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True)
 
     accuracies = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
     times = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
@@ -148,12 +150,6 @@ def retrieval_task(dataset, k, n, seed):
             # are considered the same!", thus we add at most 1 to the retrieval rate count:
             retrieval_rate += 1
 
-
-    # old, incorrect interpretation
-    # for sknn_neighbor, pqnn_neighbors in zip(indices_sknn, indices_pqnn):
-    #     if sknn_neighbor[0] in pqnn_neighbors:
-    #         retrieval_rate += 1
-
     # retrieval_rate = 1.0  # all present in top-k of ProdQuanNN
     # retrieval_rate = 0.0  # none present in top-k of ProdQuanNN
 
@@ -183,16 +179,21 @@ def hyperparam_task(dataset, k, n, seed):
     npartitions_val = PROD_QUAN_SETTINGS[dataset]['npartitions']
     p_step = max(int(npartitions_val / 10), 1)
     npartitions_vals = np.arange(max(npartitions_val - 5 * p_step, 1), npartitions_val + 6 * p_step, p_step)
-    npartitions_vals = list(filter(lambda x: x > 0, npartitions_vals))
+    # npartitions_vals = list(filter(lambda x: x > 0, npartitions_vals))
+    npartitions_vals = [x for x in npartitions_vals if x > 0]
+    npartitions_vals = [pow(2,x) for x in range(10)]
 
     nclusters_val = PROD_QUAN_SETTINGS[dataset]['nclusters']
     c_step = max(int(nclusters_val / 10), 1)
     nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
-    nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
+    # nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
+    nclusters_vals = [x for x in nclusters_vals if x > 0]
+    nclusters_val = [pow(2,x) for x in range(4,11)]
 
     times = {}
     accuracies = {}
     logger = logging.getLogger()
+    npartitions_vals = nclusters_vals = range(5,6)
 
     for npartitions in npartitions_vals:
         for nclusters in nclusters_vals:
@@ -200,11 +201,11 @@ def hyperparam_task(dataset, k, n, seed):
             start_time = time()
             try:  # TODO fix this: this fails when n is not sufficiently large
                 pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
+                elapsed_time = time() - start_time
             except ValueError as e:
-                logger.error(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
+                logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
                 continue
 
-            elapsed_time = time() - start_time
             indices, _ = pqnn.get_neighbors(xsample, k)
             predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
 
@@ -215,22 +216,35 @@ def hyperparam_task(dataset, k, n, seed):
                 times[npartitions] = {nclusters: elapsed_time}
                 accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
 
-    plot_dict(times, 'Execution time')
-    plot_dict(accuracies, 'Accuracy')
+    # save and plot results
+    file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
+    plot_dict(times, 'Execution time', file_name)
+    plot_dict(accuracies, 'Accuracy', file_name)
+    save_results(times, accuracies, file_name)
 
     # TODO optimize the hyper parameters of ProdQuanNN and produce plot
 
 
-def plot_dict(dict, ylabel):
+def plot_dict(d, ylabel, file_name=None):
     _, ax = plt.subplots()
-    for npartitions in dict.keys():
-        ax.plot(dict[npartitions].keys(), dict[npartitions].values(), label=f'{npartitions} partitions')
+    for npartitions in d.keys():
+        ax.plot(d[npartitions].keys(), d[npartitions].values(), label=f'{npartitions} partitions')
     plt.title(f'{ylabel} in function of number of clusters')
     plt.ylabel(f'{ylabel} (s)')
     plt.xlabel('Number of clusters')
     plt.legend()
-    plt.show()
+    if file_name:
+        plt.savefig(join(RESULTS_DIR, 'plots', f'{ylabel}--{file_name}'))
+    try:
+        plt.show()
+    except Exception as e:
+        logging.getLogger('plotter').warning(e)
 
+def save_results(times, accuracies, file_name):
+    with open(join(RESULTS_DIR, 'data', f'time--{file_name}.pckl'), 'wb') as f:
+        dump(times, f, protocol=HIGHEST_PROTOCOL)
+    with open(join(RESULTS_DIR, 'data', f'acc--{file_name}.pckl'), 'wb') as f:
+        dump(accuracies, f, protocol=HIGHEST_PROTOCOL)
 
 def plot_task(dataset, k, n, seed):
     """
