@@ -79,7 +79,6 @@ namespace bdap {
              */
             getDistancesToExample(examples, distancesToCentroids, distancesToExample);
 
-            // TODO use a priority queue instead of a vector?
             // Sort the distances to find the `nneighbours` nearest neighbours
             // Sorted on first element of each tuple, i.e.: the distance
             sort(distancesToExample.begin(), distancesToExample.end());

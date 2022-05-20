@@ -188,12 +188,11 @@ def hyperparam_task(dataset, k, n, seed):
     nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
     # nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
     nclusters_vals = [x for x in nclusters_vals if x > 0]
-    nclusters_val = [pow(2,x) for x in range(4,11)]
+    nclusters_vals = [pow(2,x) for x in range(4,11)]
 
     times = {}
     accuracies = {}
     logger = logging.getLogger()
-    npartitions_vals = nclusters_vals = range(5,6)
 
     for npartitions in npartitions_vals:
         for nclusters in nclusters_vals:
@@ -229,6 +228,7 @@ def plot_dict(d, ylabel, file_name=None):
     _, ax = plt.subplots()
     for npartitions in d.keys():
         ax.plot(d[npartitions].keys(), d[npartitions].values(), label=f'{npartitions} partitions')
+    ax.set_xscale('log', basex=2)
     plt.title(f'{ylabel} in function of number of clusters')
     plt.ylabel(f'{ylabel} (s)')
     plt.xlabel('Number of clusters')

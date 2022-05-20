@@ -97,8 +97,11 @@ class ProdQuanNN(BaseNN):
     def _build_quantization(dataset, xtrain, npartitions, nclusters):
         nexamples, nfeatures = xtrain.shape
         step = int(np.ceil(nfeatures/npartitions))
-        partition_boundaries = np.minimum(nfeatures,
-                np.arange(0, nfeatures+step-1, step))
+        # partition_boundaries = np.minimum(nfeatures,
+        #         np.arange(0, nfeatures+step-1, step))
+        # The TA suggests the following replacement to also test partitions containing only 1 feature for exmaple:
+        partition_boundaries = np.round(np.linspace(0, nfeatures, npartitions+1).astype(int))
+
         partitions = []
         print("BUILDING PRODUCT QUANTIZATION PARTITIONS")
         for i in range(npartitions):

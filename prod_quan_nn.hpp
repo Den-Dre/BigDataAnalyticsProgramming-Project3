@@ -85,8 +85,8 @@ namespace bdap {
         //
         // ========================================================================
 
-//        std::vector<std::vector<float>>& distancesToCentroids;
-//        std::vector<std::tuple<float, int>>& distancesToExample;
+//        std::vector<std::vector<float>> distancesToCentroids;
+//        std::vector<std::tuple<float, int>> distancesToExample;
 
     public:
         /**

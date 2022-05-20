@@ -6,6 +6,12 @@
 # THIS FILE IS NOT GRADED, MAKE SURE YOUR CODE WORKS WITH THE ORIGINAL FILE!  #
 #                                                                             #
 ###############################################################################
+import linecache
+import tracemalloc
+from datetime import datetime
+from queue import Empty, Queue
+from resource import RUSAGE_SELF, getrusage
+from threading import Thread
 
 import joblib, sys, os
 import numpy as np
@@ -34,43 +40,95 @@ def parse_arguments():
 
     return args
 
+def memory_monitor(command_queue: Queue, poll_interval=1):
+    tracemalloc.start()
+    old_max = 0
+    snapshot = None
+    while True:
+        try:
+            command_queue.get(timeout=poll_interval)
+            if snapshot is not None:
+                print(datetime.now())
+                display_top(snapshot)
+
+            return
+        except Empty:
+            max_rss = getrusage(RUSAGE_SELF).ru_maxrss
+            if max_rss > old_max:
+                old_max = max_rss
+                snapshot = tracemalloc.take_snapshot()
+                print(datetime.now(), 'max RSS', max_rss)
+
+
+def display_top(snapshot, key_type='lineno', limit=3):
+    snapshot = snapshot.filter_traces((
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+        tracemalloc.Filter(False, "<unknown>"),
+    ))
+    top_stats = snapshot.statistics(key_type)
+
+    print("Top %s lines" % limit)
+    for index, stat in enumerate(top_stats[:limit], 1):
+        frame = stat.traceback[0]
+        # replace "/path/to/module/file.py" with "module/file.py"
+        filename = os.sep.join(frame.filename.split(os.sep)[-2:])
+        print("#%s: %s:%s: %.1f KiB"
+              % (index, filename, frame.lineno, stat.size / 1024))
+        line = linecache.getline(frame.filename, frame.lineno).strip()
+        if line:
+            print('    %s' % line)
+
+    other = top_stats[limit:]
+    if other:
+        size = sum(stat.size for stat in other)
+        print("%s other: %.1f KiB" % (len(other), size / 1024))
+    total = sum(stat.size for stat in top_stats)
+    print("Total allocated size: %.1f KiB" % (total / 1024))
+
 if __name__ == "__main__":
     args = parse_arguments()
     dataset, task = args.dataset, args.task
     k, n, seed = args.k, args.n, args.seed
 
-    if task == "time_and_accuracy":
-        print("ACCURACY TASK")
-        res = functions.time_and_accuracy_task(dataset, k, n, seed)
-        pprint.pprint(res)
+    queue = Queue()
+    poll_interval = 0.1
+    monitor_thread = Thread(target=memory_monitor, args=(queue, poll_interval))
+    monitor_thread.start()
 
-    elif task == "distance_error":
-        print("DISTANCE_ABSOLUTE_ERROR TASK")
-        res = functions.distance_absolute_error_task(dataset, k, n, seed)
-        print(res)
+    try:
+        if task == "time_and_accuracy":
+            print("ACCURACY TASK")
+            res = functions.time_and_accuracy_task(dataset, k, n, seed)
+            pprint.pprint(res)
+        elif task == "distance_error":
+            print("DISTANCE_ABSOLUTE_ERROR TASK")
+            res = functions.distance_absolute_error_task(dataset, k, n, seed)
+            print(res)
 
-    elif task == "retrieval":
-        print("RETRIEVAL TASK")
-        res = functions.retrieval_task(dataset, k, n, seed)
-        print(res)
+        elif task == "retrieval":
+            print("RETRIEVAL TASK")
+            res = functions.retrieval_task(dataset, k, n, seed)
+            print(res)
 
-    elif task == "hyperparam":
-        print("HYPERPARAM TASK")
-        if n != 1000:
-            n = 1000
-            print("Using n=1000")
-        if k != 10:
-            k = 10
-            print("Using k=10")
-        functions.hyperparam_task(dataset, k, n, seed)
+        elif task == "hyperparam":
+            print("HYPERPARAM TASK")
+            if n != 1000:
+                n = 1000
+                print("Using n=1000")
+            if k != 10:
+                k = 10
+                print("Using k=10")
+            functions.hyperparam_task(dataset, k, n, seed)
 
-    elif task == "plot":
-        print("PLOT TASK")
-        functions.plot_task(dataset, k, n, seed)
+        elif task == "plot":
+            print("PLOT TASK")
+            functions.plot_task(dataset, k, n, seed)
 
-    else:
-        print(f"Invalid task '{task}'")
-        args.print_help()
-
+        else:
+            print(f"Invalid task '{task}'")
+            args.print_help()
+    finally:
+        queue.put('stop')
+        monitor_thread.join()
 
 

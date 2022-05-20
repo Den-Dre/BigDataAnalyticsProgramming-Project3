@@ -55,7 +55,7 @@ def load_dataset(dataset):
         sys.exit(2)
 
     x, y = x.astype(np.float32), y.astype(int)
-    save_to_csv(dataset, x, y)
+    # save_to_csv(dataset, x, y)
     xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.2,
             random_state=0)
 
