@@ -35,12 +35,6 @@ namespace bdap {
         //std::cout << "Construct auxiliary structures here" << std::endl;
     }
 
-    bool sortBySecond(const tuple<float, int>& a,
-                      const tuple<float, int>& b)
-    {
-        return (get<1>(a) < get<1>(b));
-    }
-
     void
     ProdQuanNN::compute_nearest_neighbors(
                 const pydata<float>& examples,

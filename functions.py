@@ -7,12 +7,12 @@
 #                                                                             #
 ###############################################################################
 import logging
-import pickle
 from collections import Counter
 from heapq import heappush, heapreplace
-from time import time
+from math import log, ceil
 from os.path import join, dirname
 from pickle import dump, HIGHEST_PROTOCOL
+from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -176,19 +176,24 @@ def hyperparam_task(dataset, k, n, seed):
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
+    nexamples = len(xtrain)
+    nfeatures = len(xtrain[0])
+    print(f'Nb. of examples: {nexamples}')
+    print(f'Nb. of features: {nfeatures}')
+
     npartitions_val = PROD_QUAN_SETTINGS[dataset]['npartitions']
     p_step = max(int(npartitions_val / 10), 1)
     npartitions_vals = np.arange(max(npartitions_val - 5 * p_step, 1), npartitions_val + 6 * p_step, p_step)
     # npartitions_vals = list(filter(lambda x: x > 0, npartitions_vals))
     npartitions_vals = [x for x in npartitions_vals if x > 0]
-    npartitions_vals = [pow(2,x) for x in range(10)]
+    npartitions_vals = [pow(2,x) for x in range(ceil(log(nfeatures, 2)))]
 
     nclusters_val = PROD_QUAN_SETTINGS[dataset]['nclusters']
     c_step = max(int(nclusters_val / 10), 1)
     nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
     # nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
     nclusters_vals = [x for x in nclusters_vals if x > 0]
-    nclusters_vals = [pow(2,x) for x in range(4,11)]
+    nclusters_vals = [pow(2,x) for x in range(ceil(log(nexamples, 2)))]
 
     times = {}
     accuracies = {}
@@ -228,7 +233,7 @@ def plot_dict(d, ylabel, file_name=None):
     _, ax = plt.subplots()
     for npartitions in d.keys():
         ax.plot(d[npartitions].keys(), d[npartitions].values(), label=f'{npartitions} partitions')
-    ax.set_xscale('log', basex=2)
+    ax.set_xscale('log', base=2)
     plt.title(f'{ylabel} in function of number of clusters')
     plt.ylabel(f'{ylabel} (s)')
     plt.xlabel('Number of clusters')

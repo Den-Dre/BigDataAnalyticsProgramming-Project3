@@ -3,3 +3,9 @@ data/
 
 # Don't add environment
 env/
+
+# Don't add test file
+test_data.py
+
+# Don't add pycache
+__pycache__/
