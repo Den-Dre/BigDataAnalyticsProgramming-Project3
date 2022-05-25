@@ -7,12 +7,15 @@
 #                                                                             #
 ###############################################################################
 import logging
+import pprint
+import sys
 from collections import Counter
 from heapq import heappush, heapreplace
 from math import log, ceil
 from os.path import join, dirname
 from pickle import dump, HIGHEST_PROTOCOL
 from time import time
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -172,6 +175,7 @@ def hyperparam_task(dataset, k, n, seed):
     additional helper functions if you want, but keep them all in this file.
     """
     from util import PROD_QUAN_SETTINGS
+    base = 2
 
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
@@ -181,23 +185,27 @@ def hyperparam_task(dataset, k, n, seed):
     print(f'Nb. of examples: {nexamples}')
     print(f'Nb. of features: {nfeatures}')
 
-    npartitions_val = PROD_QUAN_SETTINGS[dataset]['npartitions']
-    p_step = max(int(npartitions_val / 10), 1)
-    npartitions_vals = np.arange(max(npartitions_val - 5 * p_step, 1), npartitions_val + 6 * p_step, p_step)
+    # npartitions_val = PROD_QUAN_SETTINGS[dataset]['npartitions']
+    # p_step = max(int(npartitions_val / 10), 1)
+    # npartitions_vals = np.arange(max(npartitions_val - 5 * p_step, 1), npartitions_val + 6 * p_step, p_step)
     # npartitions_vals = list(filter(lambda x: x > 0, npartitions_vals))
-    npartitions_vals = [x for x in npartitions_vals if x > 0]
-    npartitions_vals = [pow(2,x) for x in range(ceil(log(nfeatures, 2)))]
+    # npartitions_vals = [x for x in npartitions_vals if x > 0]
+    npartitions_vals = [pow(base,x) for x in range(ceil(log(nfeatures, base)))]
 
-    nclusters_val = PROD_QUAN_SETTINGS[dataset]['nclusters']
-    c_step = max(int(nclusters_val / 10), 1)
-    nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
+    # nclusters_val = PROD_QUAN_SETTINGS[dataset]['nclusters']
+    # c_step = max(int(nclusters_val / 10), 1)
+    # nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
     # nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
-    nclusters_vals = [x for x in nclusters_vals if x > 0]
-    nclusters_vals = [pow(2,x) for x in range(ceil(log(nexamples, 2)))]
+    # nclusters_vals = [x for x in nclusters_vals if  x > 0]
+    nclusters_vals = [pow(base,x) for x in range(ceil(log(nexamples, base))) if x < pow(base, x) < 10000]
 
-    times = {}
+    print(f'Values of partitions: {npartitions_vals}')
+    print(f'Values of clusters: {nclusters_vals}')
+
     accuracies = {}
+    times = {}
     logger = logging.getLogger()
+    file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
 
     for npartitions in npartitions_vals:
         for nclusters in nclusters_vals:
@@ -219,23 +227,31 @@ def hyperparam_task(dataset, k, n, seed):
             else:
                 times[npartitions] = {nclusters: elapsed_time}
                 accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
+            try:
+                save_results(times, accuracies, file_name)
+            except Exception as e:
+                logger.warning(f'Error while saving results: {e}')
 
     # save and plot results
-    file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
-    plot_dict(times, 'Execution time', file_name)
-    plot_dict(accuracies, 'Accuracy', file_name)
+    print('Results of times:')
+    pprint.pprint(times)
+    print('Results of accuracies:')
+    pprint.pprint(accuracies)
     save_results(times, accuracies, file_name)
+    plot_dict(times, 'Execution time', file_name=file_name)
+    plot_dict(accuracies, 'Accuracy', file_name=file_name)
 
     # TODO optimize the hyper parameters of ProdQuanNN and produce plot
 
 
-def plot_dict(d, ylabel, file_name=None):
+def plot_dict(d, ylabel, file_name=None, base=2):
     _, ax = plt.subplots()
     for npartitions in d.keys():
         ax.plot(d[npartitions].keys(), d[npartitions].values(), label=f'{npartitions} partitions')
-    ax.set_xscale('log', base=2)
+    ax.set_xscale('log', base=base)
+    # ax.set_yscale('log', base=base)
     plt.title(f'{ylabel} in function of number of clusters')
-    plt.ylabel(f'{ylabel} (s)')
+    plt.ylabel(f'{ylabel}')
     plt.xlabel('Number of clusters')
     plt.legend()
     if file_name:
