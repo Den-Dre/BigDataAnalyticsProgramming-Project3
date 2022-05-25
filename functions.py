@@ -202,7 +202,6 @@ def hyperparam_task(dataset, k, n, seed):
 
     print(f'Values of partitions: {npartitions_vals}')
     print(f'Values of clusters: {nclusters_vals}')
-    nclusters_vals = npartitions_vals = range(5,7)
 
     accuracies = {}
     times = {}
