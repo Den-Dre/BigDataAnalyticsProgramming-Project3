@@ -7,22 +7,23 @@
 #                                                                             #
 ###############################################################################
 import logging
+import multiprocessing.managers
 import pprint
-import sys
 from collections import Counter
 from heapq import heappush, heapreplace
 from math import log, ceil
 from os.path import join, dirname
 from pickle import dump, HIGHEST_PROTOCOL
 from time import time
-from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
+from multiprocessing import Manager, Process
 
 import util
 
 RESULTS_DIR = join(dirname(__file__), 'results')
+USE_MP = True
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
@@ -201,47 +202,97 @@ def hyperparam_task(dataset, k, n, seed):
 
     print(f'Values of partitions: {npartitions_vals}')
     print(f'Values of clusters: {nclusters_vals}')
+    nclusters_vals = npartitions_vals = range(5,7)
 
     accuracies = {}
     times = {}
     logger = logging.getLogger()
     file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
+    if USE_MP:
+        file_name = 'MP--' + file_name
 
-    for npartitions in npartitions_vals:
-        for nclusters in nclusters_vals:
-            print(f'Using {npartitions} partitions and {nclusters} clusters... ')
-            start_time = time()
-            try:  # TODO fix this: this fails when n is not sufficiently large
-                pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
-                elapsed_time = time() - start_time
-            except ValueError as e:
-                logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
-                continue
+    if USE_MP:
+        manager = Manager()
+        times = manager.dict()
+        accuracies = manager.dict()
+        pc_tups = []
+        for p in npartitions_vals:
+            for c in nclusters_vals:
+                pc_tups.append((p,c))
+        job = [Process(target=run_parallel_experiments,
+                                       args=(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, p, c)) for p, c in pc_tups]
+        _ = [p.start() for p in job]
+        _ = [p.join() for p in job]
+    else:
+        for npartitions in npartitions_vals:
+            for nclusters in nclusters_vals:
+                print(f'Using {npartitions} partitions and {nclusters} clusters... ')
+                start_time = time()
+                try:  # TODO fix this: this fails when n is not sufficiently large
+                    pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain,  npartitions=npartitions, nclusters=nclusters)
+                    elapsed_time = time() - start_time
+                except ValueError as e:
+                    logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
+                    continue
 
-            indices, _ = pqnn.get_neighbors(xsample, k)
-            predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
+                indices, _ = pqnn.get_neighbors(xsample, k)
+                predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
 
-            if npartitions in times:
-                times[npartitions][nclusters] = elapsed_time
-                accuracies[npartitions][nclusters] = compute_accuracy(ysample, predicted_labels)
-            else:
-                times[npartitions] = {nclusters: elapsed_time}
-                accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
-            try:
-                save_results(times, accuracies, file_name)
-            except Exception as e:
-                logger.warning(f'Error while saving results: {e}')
+                if npartitions in times:
+                    times[npartitions][nclusters] = elapsed_time
+                    accuracies[npartitions][nclusters] = compute_accuracy(ysample, predicted_labels)
+                else:
+                    times[npartitions] = {nclusters: elapsed_time}
+                    accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
+                try:
+                    save_results(times, accuracies, file_name)
+                except Exception as e:
+                    logger.warning(f'Error while saving results: {e}')
 
     # save and plot results
     print('Results of times:')
-    pprint.pprint(times)
+    print(times)
     print('Results of accuracies:')
-    pprint.pprint(accuracies)
+    print(accuracies)
     save_results(times, accuracies, file_name)
     plot_dict(times, 'Execution time', file_name=file_name)
     plot_dict(accuracies, 'Accuracy', file_name=file_name)
 
     # TODO optimize the hyper parameters of ProdQuanNN and produce plot
+
+def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters):
+    logger = logging.getLogger()
+
+    print(f'Using {npartitions} partitions and {nclusters} clusters... ')
+    start_time = time()
+    try:  # TODO fix this: this fails when n is not sufficiently large
+        pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
+        elapsed_time = time() - start_time
+    except ValueError as e:
+        logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
+        return
+
+    indices, _ = pqnn.get_neighbors(xsample, k)
+    predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
+
+    print(f'For {npartitions, nclusters} if test returns {npartitions in dict(times).keys()} with dict: {dict(times)}')
+    if npartitions in dict(times).keys():
+        tmp = times[npartitions]
+        tmp[nclusters] = elapsed_time
+        times[npartitions] = tmp
+
+        tmp = accuracies[npartitions]
+        tmp[nclusters] = compute_accuracy(ysample, predicted_labels)
+        accuracies[npartitions] = tmp
+    else:
+        times[npartitions] = {nclusters: elapsed_time}
+        accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
+    try:
+        save_results(times, accuracies, file_name)
+    except Exception as e:
+        logger.warning(f'Error while saving results: {e}')
+    return times, accuracies
+
 
 
 def plot_dict(d, ylabel, file_name=None, base=2):
@@ -262,6 +313,10 @@ def plot_dict(d, ylabel, file_name=None, base=2):
         logging.getLogger('plotter').warning(e)
 
 def save_results(times, accuracies, file_name):
+    if isinstance(times, multiprocessing.managers.DictProxy):
+        times = dict(times)
+    if isinstance(accuracies, multiprocessing.managers.DictProxy):
+        accuracies = dict(accuracies)
     with open(join(RESULTS_DIR, 'data', f'time--{file_name}.pckl'), 'wb') as f:
         dump(times, f, protocol=HIGHEST_PROTOCOL)
     with open(join(RESULTS_DIR, 'data', f'acc--{file_name}.pckl'), 'wb') as f:
