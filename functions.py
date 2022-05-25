@@ -200,6 +200,7 @@ def hyperparam_task(dataset, k, n, seed):
     # nclusters_vals = [x for x in nclusters_vals if  x > 0]
     nclusters_vals = [pow(base,x) for x in range(ceil(log(nexamples, base))) if x < pow(base, x) < 10000]
 
+    nclusters_vals = npartitions_vals = range(5,7)
     print(f'Values of partitions: {npartitions_vals}')
     print(f'Values of clusters: {nclusters_vals}')
 
@@ -207,21 +208,19 @@ def hyperparam_task(dataset, k, n, seed):
     times = {}
     logger = logging.getLogger()
     file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
-    if USE_MP:
-        file_name = 'MP--' + file_name
 
     if USE_MP:
         manager = Manager()
         times = manager.dict()
         accuracies = manager.dict()
+        file_name = 'MP--' + file_name
         pc_tups = []
         for p in npartitions_vals:
             for c in nclusters_vals:
-                pc_tups.append((p,c))
-        job = [Process(target=run_parallel_experiments,
-                                       args=(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, p, c)) for p, c in pc_tups]
-        _ = [p.start() for p in job]
-        _ = [p.join() for p in job]
+                pc_tups.append((times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, p,c))
+
+        with multiprocessing.Pool(processes=6) as pool:
+            pool.starmap(run_parallel_experiments, pc_tups)
     else:
         for npartitions in npartitions_vals:
             for nclusters in nclusters_vals:
@@ -259,7 +258,8 @@ def hyperparam_task(dataset, k, n, seed):
 
     # TODO optimize the hyper parameters of ProdQuanNN and produce plot
 
-def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters):
+def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters ):
+    # times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters = args
     logger = logging.getLogger()
 
     print(f'Using {npartitions} partitions and {nclusters} clusters... ')
