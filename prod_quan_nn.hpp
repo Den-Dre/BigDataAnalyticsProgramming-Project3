@@ -18,6 +18,7 @@
 
 // self-added
 #include <tuple>
+#include <queue>
 
 #ifndef PROD_QUAN_NN_GUARD
 #define PROD_QUAN_NN_GUARD 1
@@ -184,6 +185,11 @@ namespace bdap {
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
 
         static void printTupleVector(const std::vector<std::tuple<float, int>>& distances) ;
+
+        void getDistancesToExample2(const pydata<float> &examples,
+                                    const std::vector<std::vector<float>> &distancesToCentroids,
+                                    std::priority_queue<std::tuple<float, int>> &distances,
+                                    int k) const;
     };
 
 
