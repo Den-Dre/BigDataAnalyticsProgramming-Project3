@@ -10,9 +10,8 @@ import logging
 import multiprocessing.managers
 import pprint
 import sys
-from collections import Counter
-from heapq import heappush, heapreplace
-from math import log, ceil, sqrt
+from heapq import heappush, heapreplace, nlargest
+from math import log, ceil
 from os.path import join, dirname
 from pickle import dump, HIGHEST_PROTOCOL
 from statistics import mode
@@ -20,7 +19,7 @@ from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
-from multiprocessing import Manager, Process
+from multiprocessing import Manager
 
 from numpy import float32
 
@@ -28,6 +27,12 @@ import util
 
 RESULTS_DIR = join(dirname(__file__), 'results')
 USE_MP = False
+CHOSEN_HYPERPARAMS = {
+    'spambase': (16, 16),
+    'covtype': (16, 32),
+    'emnist_orig': (16, 32),
+    'emnist': (16, 32),
+}
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
@@ -40,7 +45,16 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
     indices = np.zeros((xtest.shape[0], k), dtype=int)
     distances = np.zeros((xtest.shape[0], k), dtype=float)
-    max_dist = -1
+
+    # Naive storing and sorting of all distances
+    # for row_idx, test_vector in enumerate(xtest):
+    #     ds = [0 for _ in range(len(xtrain))]
+    #     for i, train_vector in enumerate(xtrain):
+    #         ds[i] = (i, np.linalg.norm(test_vector - train_vector))
+    #     ds.sort(key=lambda x: x[1])
+    #     for idx, (i, d) in enumerate(ds[:k]):
+    #         indices[row_idx][idx] = i
+    #         distances[row_idx][idx] = d
 
     for row_idx, test_vector in enumerate(xtest):
         pq = []
@@ -49,14 +63,11 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
             if len(pq) < k:
                 # Add negative distance to sort pq by least distance
                 heappush(pq, (i, -distance))
-                max_dist = -pq[0][1]
-            elif distance < max_dist:
-                heapreplace(pq, (i, -distance))
-                max_dist = -pq[0][1]
-        indices[row_idx] = [tup[0] for tup in pq]
-        distances[row_idx] = [-tup[1] for tup in pq]
-        # https://stackoverflow.com/a/12974504/15482295
-        # indices[row_idx], distances[row_idx] = [list(x) for x in zip(*pq)]  # minus must still be added...
+            elif distance < -pq[0][1]:           # smaller than current largest distance
+                heapreplace(pq, (i, -distance))  # pop largest distance and add xtest[i]
+        for idx, (i, neg_distance) in enumerate(nlargest(k, pq, key=lambda x: x[1])):
+            indices[row_idx][idx] = i
+            distances[row_idx][idx] = -neg_distance
     return indices, distances
 
 
@@ -86,7 +97,8 @@ def time_and_accuracy_task(dataset, k, n, seed):
     """
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
-    nns = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True)
+    npartitions, nclusters = CHOSEN_HYPERPARAMS[dataset]
+    nns = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True, npartitions=npartitions, nclusters=nclusters)
 
     accuracies = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
     times = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
@@ -100,7 +112,7 @@ def time_and_accuracy_task(dataset, k, n, seed):
         start_time = time()
         indices, dist = nn.get_neighbors(xsample, k)
         times[str_nn] = time() - start_time
-        print(f'{str_nn}: {indices}')
+        # print(f'{str_nn}: {indices}')
         # print(f'{str_nn}: {dist}')
 
         predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
@@ -116,11 +128,11 @@ def distance_absolute_error_task(dataset, k, n, seed):
 
     Return a single real value.
     """
-    print(f'seed: {seed}')
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
-    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False)
+    npartitions, nclusters = CHOSEN_HYPERPARAMS[dataset]
+    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, npartitions=npartitions, nclusters=nclusters)
 
     _, distances_pqnn = pqnn.get_neighbors(xsample, k=k)
     _, distances_sknn = sknn.get_neighbors(xsample, k=k)
@@ -145,7 +157,10 @@ def retrieval_task(dataset, k, n, seed):
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
     nearest = np.argmin([np.linalg.norm(xsample[0] - train) for train in xtrain])
-    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, nclusters=8, npartitions=4)
+
+    npartitions, nclusters = CHOSEN_HYPERPARAMS[dataset]
+    print(f'Using {npartitions, nclusters}')
+    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, npartitions=npartitions, nclusters=nclusters)
 
     indices_sknn, distances_sknn = sknn.get_neighbors(xsample,k)
     # indices_sknn, distances_sknn = indices_sknn.astype(int), distances_sknn.astype(float32)
@@ -308,8 +323,8 @@ def plot_dict(d, ylabel, file_name=None, base=2):
     for npartitions in d.keys():
         ax.plot(list(d[npartitions].keys())[:], list(d[npartitions].values())[:], label=f'{npartitions} partitions')
     ax.set_xscale('log', base=base)
-    # ax.set_yscale('log', base=10)
-    plt.title(f'{ylabel} in function of number of clusters')
+    ax.set_yscale('log', base=10)
+    plt.title(f'Accuracy in function of number of clusters')
     plt.ylabel(f'{ylabel}')
     plt.xlabel('Number of clusters')
     plt.legend()
