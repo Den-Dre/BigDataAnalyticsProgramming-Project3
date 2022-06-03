@@ -9,21 +9,25 @@
 import logging
 import multiprocessing.managers
 import pprint
+import sys
 from collections import Counter
 from heapq import heappush, heapreplace
-from math import log, ceil
+from math import log, ceil, sqrt
 from os.path import join, dirname
 from pickle import dump, HIGHEST_PROTOCOL
+from statistics import mode
 from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 from multiprocessing import Manager, Process
 
+from numpy import float32
+
 import util
 
 RESULTS_DIR = join(dirname(__file__), 'results')
-USE_MP = True
+USE_MP = False
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
@@ -64,10 +68,10 @@ def compute_accuracy(ytrue, ypredicted):
     for x, y in zip(ytrue, ypredicted):
         # Predict the most occurring class among the neighbors:
         # print(f'x: {x}, y: {y}')
-        if Counter(y)[x] >= len(y) / 2:
-            cnt += 1
-        # if x == mode(y):  # mode == most frequent prediction
+        # if Counter(y)[x] >= len(y) / 2:
         #     cnt += 1
+        if x == mode(y):  # mode == most frequent prediction
+            cnt += 1
     acc = cnt / len(ytrue)
     return acc
 
@@ -112,10 +116,11 @@ def distance_absolute_error_task(dataset, k, n, seed):
 
     Return a single real value.
     """
+    print(f'seed: {seed}')
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
-    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True)
+    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False)
 
     _, distances_pqnn = pqnn.get_neighbors(xsample, k=k)
     _, distances_sknn = sknn.get_neighbors(xsample, k=k)
@@ -139,19 +144,34 @@ def retrieval_task(dataset, k, n, seed):
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
-    pqnn, npnn, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True, nclusters=8, npartitions=4)
+    nearest = np.argmin([np.linalg.norm(xsample[0] - train) for train in xtrain])
+    pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, nclusters=8, npartitions=4)
 
-    indices_sknn, distances_sknn = sknn.get_neighbors(xsample)
+    indices_sknn, distances_sknn = sknn.get_neighbors(xsample,k)
+    # indices_sknn, distances_sknn = indices_sknn.astype(int), distances_sknn.astype(float32)
+
     indices_pqnn, _ = pqnn.get_neighbors(xsample, k)
+    # indices_pqnn = indices_pqnn.astype(int)
 
-    retrieval_rate = 0.0
+
+    retrieval_rate = 0
+
+    def l2norm(vect):
+        res = np.sqrt(np.sum(np.power(vect, 2)))
+        print(f'({np.abs(res - np.linalg.norm(vect))})')
+        return res
 
     for ti_idx, ti in enumerate(xsample):
         # calculate the *exact* distances of the k-NN returned by pqnn
-        exact_pqnn_distances = [np.linalg.norm(ti - xtrain[i]) for i in indices_pqnn[ti_idx]]
+        # exact_pqnn_distances = [np.linalg.norm(ti - xtrain[i]) for i in indices_pqnn[ti_idx]]
+        exact_pqnn_distances = np.array([np.linalg.norm(np.subtract(ti, xtrain[i])) for i in indices_pqnn[ti_idx]], dtype=float32)
+        diffs = np.abs(np.subtract(exact_pqnn_distances, distances_sknn[ti_idx][0]))
+        min_idx = np.argmin(diffs)
+        if  0 < diffs[min_idx] < 1e-7: print(f'Small diff: {exact_pqnn_distances[min_idx], distances_sknn[ti_idx][0]}')
         if distances_sknn[ti_idx][0] in exact_pqnn_distances:
             # "Important note: neighbors with the exact same distance to the test instance
             # are considered the same!", thus we add at most 1 to the retrieval rate count:
+            # We also count numbers with errors smaller than 1 * 10^-7 as the same
             retrieval_rate += 1
 
     # retrieval_rate = 1.0  # all present in top-k of ProdQuanNN
@@ -186,21 +206,9 @@ def hyperparam_task(dataset, k, n, seed):
     print(f'Nb. of examples: {nexamples}')
     print(f'Nb. of features: {nfeatures}')
 
-    # npartitions_val = PROD_QUAN_SETTINGS[dataset]['npartitions']
-    # p_step = max(int(npartitions_val / 10), 1)
-    # npartitions_vals = np.arange(max(npartitions_val - 5 * p_step, 1), npartitions_val + 6 * p_step, p_step)
-    # npartitions_vals = list(filter(lambda x: x > 0, npartitions_vals))
-    # npartitions_vals = [x for x in npartitions_vals if x > 0]
     npartitions_vals = [pow(base,x) for x in range(ceil(log(nfeatures, base)))]
-
-    # nclusters_val = PROD_QUAN_SETTINGS[dataset]['nclusters']
-    # c_step = max(int(nclusters_val / 10), 1)
-    # nclusters_vals = np.arange(max(nclusters_val - 5 * c_step, 1), nclusters_val + 5 * c_step, c_step)
-    # nclusters_vals = list(filter(lambda x: x > 0, nclusters_vals))
-    # nclusters_vals = [x for x in nclusters_vals if  x > 0]
     nclusters_vals = [pow(base,x) for x in range(ceil(log(nexamples, base))) if x < pow(base, x) < 10000]
 
-    nclusters_vals = npartitions_vals = range(5,7)
     print(f'Values of partitions: {npartitions_vals}')
     print(f'Values of clusters: {nclusters_vals}')
 
@@ -218,9 +226,10 @@ def hyperparam_task(dataset, k, n, seed):
         for p in npartitions_vals:
             for c in nclusters_vals:
                 pc_tups.append((times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, p,c))
-
-        with multiprocessing.Pool(processes=6) as pool:
-            pool.starmap(run_parallel_experiments, pc_tups)
+        pool = multiprocessing.Pool()
+        pool.starmap(run_parallel_experiments, pc_tups)
+        pool.close()
+        pool.join()
     else:
         for npartitions in npartitions_vals:
             for nclusters in nclusters_vals:
@@ -297,9 +306,9 @@ def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample
 def plot_dict(d, ylabel, file_name=None, base=2):
     _, ax = plt.subplots()
     for npartitions in d.keys():
-        ax.plot(d[npartitions].keys(), d[npartitions].values(), label=f'{npartitions} partitions')
+        ax.plot(list(d[npartitions].keys())[:], list(d[npartitions].values())[:], label=f'{npartitions} partitions')
     ax.set_xscale('log', base=base)
-    # ax.set_yscale('log', base=base)
+    # ax.set_yscale('log', base=10)
     plt.title(f'{ylabel} in function of number of clusters')
     plt.ylabel(f'{ylabel}')
     plt.xlabel('Number of clusters')
