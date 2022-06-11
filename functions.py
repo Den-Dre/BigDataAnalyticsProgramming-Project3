@@ -8,7 +8,7 @@
 ###############################################################################
 import logging
 import multiprocessing.managers
-import pprint
+import pickle
 import sys
 from heapq import heappush, heapreplace, nlargest
 from math import log, ceil
@@ -19,19 +19,18 @@ from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
-from multiprocessing import Manager
 
 from numpy import float32
 
 import util
 
 RESULTS_DIR = join(dirname(__file__), 'results')
-USE_MP = False
 CHOSEN_HYPERPARAMS = {
     'spambase': (16, 16),
     'covtype': (16, 32),
     'emnist_orig': (16, 32),
     'emnist': (16, 32),
+    'higgs': (8, 64),
 }
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
@@ -46,26 +45,15 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
     indices = np.zeros((xtest.shape[0], k), dtype=int)
     distances = np.zeros((xtest.shape[0], k), dtype=float)
 
-    # Naive storing and sorting of all distances
-    # for row_idx, test_vector in enumerate(xtest):
-    #     ds = [0 for _ in range(len(xtrain))]
-    #     for i, train_vector in enumerate(xtrain):
-    #         ds[i] = (i, np.linalg.norm(test_vector - train_vector))
-    #     ds.sort(key=lambda x: x[1])
-    #     for idx, (i, d) in enumerate(ds[:k]):
-    #         indices[row_idx][idx] = i
-    #         distances[row_idx][idx] = d
-
     for row_idx, test_vector in enumerate(xtest):
         pq = []
         for i, train_vector in enumerate(xtrain):
             distance = np.linalg.norm(test_vector - train_vector)
             if len(pq) < k:
-                # Add negative distance to sort pq by least distance
-                heappush(pq, (i, -distance))
-            elif distance < -pq[0][1]:           # smaller than current largest distance
-                heapreplace(pq, (i, -distance))  # pop largest distance and add xtest[i]
-        for idx, (i, neg_distance) in enumerate(nlargest(k, pq, key=lambda x: x[1])):
+                heappush(pq, (-distance, i))     # Add negative distance to sort pq by least distance (heapq is a min-heap)
+            elif distance < -pq[0][0]:           # current is smaller than current largest distance (= minimum element of pq)
+                heapreplace(pq, (-distance, i))  # pop pq[0] (minimum value) and push xtest[i]
+        for idx, (neg_distance, i) in enumerate(nlargest(k, pq, key=lambda x: x[0])):
             indices[row_idx][idx] = i
             distances[row_idx][idx] = -neg_distance
     return indices, distances
@@ -78,9 +66,6 @@ def compute_accuracy(ytrue, ypredicted):
     cnt = 0
     for x, y in zip(ytrue, ypredicted):
         # Predict the most occurring class among the neighbors:
-        # print(f'x: {x}, y: {y}')
-        # if Counter(y)[x] >= len(y) / 2:
-        #     cnt += 1
         if x == mode(y):  # mode == most frequent prediction
             cnt += 1
     acc = cnt / len(ytrue)
@@ -103,17 +88,13 @@ def time_and_accuracy_task(dataset, k, n, seed):
     accuracies = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
     times = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
 
-    # TODO use the methods in the base class `BaseNN` to classify the instances
-    #   in `xsample`. Then compute the accuracy with your implementation of
-    #   `compute_accuracy` above using the true labels `ysample` and your
-    #   predicted values.
-
     for nn, str_nn in zip(nns, times.keys()):
+        if str_nn == "pqnn": continue
         start_time = time()
         indices, dist = nn.get_neighbors(xsample, k)
-        times[str_nn] = time() - start_time
-        # print(f'{str_nn}: {indices}')
-        # print(f'{str_nn}: {dist}')
+        print(f'{str_nn} neighbors: {indices}')
+        print(f'{str_nn} distances: {dist}')
+        times[str_nn] = time() - start_time  # Measure prediction time
 
         predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
         accuracies[str_nn] = compute_accuracy(ysample, predicted_labels)
@@ -152,47 +133,45 @@ def retrieval_task(dataset, k, n, seed):
     are considered the same!
 
     Return a single real value between 0 and 1.
+    retrieval_rate = 1.0  # all present in top-k of ProdQuanNN
+    retrieval_rate = 0.0  # none present in top-k of ProdQuanNN
     """
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
 
-    nearest = np.argmin([np.linalg.norm(xsample[0] - train) for train in xtrain])
-
     npartitions, nclusters = CHOSEN_HYPERPARAMS[dataset]
-    print(f'Using {npartitions, nclusters}')
+    print(f'Using {(npartitions, nclusters)=}')
+    print(f'Using {k=}')
     pqnn, _, sknn = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, npartitions=npartitions, nclusters=nclusters)
 
     indices_sknn, distances_sknn = sknn.get_neighbors(xsample,k)
-    # indices_sknn, distances_sknn = indices_sknn.astype(int), distances_sknn.astype(float32)
-
     indices_pqnn, _ = pqnn.get_neighbors(xsample, k)
-    # indices_pqnn = indices_pqnn.astype(int)
-
-
     retrieval_rate = 0
-
-    def l2norm(vect):
-        res = np.sqrt(np.sum(np.power(vect, 2)))
-        print(f'({np.abs(res - np.linalg.norm(vect))})')
-        return res
+    unique_distances = 0
+    seen_neighbors = []
 
     for ti_idx, ti in enumerate(xsample):
+        # "Important note: neighbors with the exact same distance to the test instance
+        # are considered the same!", thus we add at most 1 to the retrieval rate count
+        # per unique neighbor, so that distances that we've seen multiple times don't
+        # affect the retrieval rate (as these are assumed to be the same neighbors):
+        if distances_sknn[ti_idx][0] in seen_neighbors:
+            continue
+
         # calculate the *exact* distances of the k-NN returned by pqnn
-        # exact_pqnn_distances = [np.linalg.norm(ti - xtrain[i]) for i in indices_pqnn[ti_idx]]
         exact_pqnn_distances = np.array([np.linalg.norm(np.subtract(ti, xtrain[i])) for i in indices_pqnn[ti_idx]], dtype=float32)
-        diffs = np.abs(np.subtract(exact_pqnn_distances, distances_sknn[ti_idx][0]))
-        min_idx = np.argmin(diffs)
-        if  0 < diffs[min_idx] < 1e-7: print(f'Small diff: {exact_pqnn_distances[min_idx], distances_sknn[ti_idx][0]}')
-        if distances_sknn[ti_idx][0] in exact_pqnn_distances:
-            # "Important note: neighbors with the exact same distance to the test instance
-            # are considered the same!", thus we add at most 1 to the retrieval rate count:
-            # We also count numbers with errors smaller than 1 * 10^-7 as the same
+        min_diff = min(np.abs(np.subtract(exact_pqnn_distances, distances_sknn[ti_idx][0])))
+        unique_distances += 1
+
+        # Account for some rounding errors by considering distances which differ less than 1e-7 as the same distance.
+        # The error margin 1e-7 is chosen such that if we set `k` to its maximal value (`k=nsamples`), the retrieval
+        # rate will be equal to 1.0
+        if min_diff < 1e-7:  # exactly or approximately the same distances
+            seen_neighbors.append(distances_sknn[ti_idx][0])
             retrieval_rate += 1
 
-    # retrieval_rate = 1.0  # all present in top-k of ProdQuanNN
-    # retrieval_rate = 0.0  # none present in top-k of ProdQuanNN
-
-    retrieval_rate /= indices_pqnn.shape[0]
+    print(f'total: {indices_pqnn.shape[0]=}, {unique_distances=}, {retrieval_rate=}')
+    retrieval_rate /= unique_distances
     return retrieval_rate
 
 
@@ -210,7 +189,6 @@ def hyperparam_task(dataset, k, n, seed):
     the hyper-parameter optimization and produce the plots. Feel free to add
     additional helper functions if you want, but keep them all in this file.
     """
-    from util import PROD_QUAN_SETTINGS
     base = 2
 
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
@@ -232,44 +210,30 @@ def hyperparam_task(dataset, k, n, seed):
     logger = logging.getLogger()
     file_name = f'{dataset}-hyp{npartitions_vals[0]}-{npartitions_vals[-1]}--{nclusters_vals[0]}-{nclusters_vals[-1]}'
 
-    if USE_MP:
-        manager = Manager()
-        times = manager.dict()
-        accuracies = manager.dict()
-        file_name = 'MP--' + file_name
-        pc_tups = []
-        for p in npartitions_vals:
-            for c in nclusters_vals:
-                pc_tups.append((times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, p,c))
-        pool = multiprocessing.Pool()
-        pool.starmap(run_parallel_experiments, pc_tups)
-        pool.close()
-        pool.join()
-    else:
-        for npartitions in npartitions_vals:
-            for nclusters in nclusters_vals:
-                print(f'Using {npartitions} partitions and {nclusters} clusters... ')
-                start_time = time()
-                try:  # TODO fix this: this fails when n is not sufficiently large
-                    pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain,  npartitions=npartitions, nclusters=nclusters)
-                    elapsed_time = time() - start_time
-                except ValueError as e:
-                    logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
-                    continue
+    for npartitions in npartitions_vals:
+        for nclusters in nclusters_vals:
+            print(f'Using {npartitions} partitions and {nclusters} clusters... ')
+            start_time = time()
+            try:
+                pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain,  npartitions=npartitions, nclusters=nclusters)
+                elapsed_time = time() - start_time  # Measure effect on training time, not prediction time
+            except ValueError as e:
+                logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
+                continue
 
-                indices, _ = pqnn.get_neighbors(xsample, k)
-                predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
+            indices, _ = pqnn.get_neighbors(xsample, k)
+            predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
 
-                if npartitions in times:
-                    times[npartitions][nclusters] = elapsed_time
-                    accuracies[npartitions][nclusters] = compute_accuracy(ysample, predicted_labels)
-                else:
-                    times[npartitions] = {nclusters: elapsed_time}
-                    accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
-                try:
-                    save_results(times, accuracies, file_name)
-                except Exception as e:
-                    logger.warning(f'Error while saving results: {e}')
+            if npartitions in times:
+                times[npartitions][nclusters] = elapsed_time
+                accuracies[npartitions][nclusters] = compute_accuracy(ysample, predicted_labels)
+            else:
+                times[npartitions] = {nclusters: elapsed_time}
+                accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
+            try:
+                save_results(times, accuracies, file_name)
+            except Exception as e:
+                logger.warning(f'Error while saving results: {e}')
 
     # save and plot results
     print('Results of times:')
@@ -280,15 +244,16 @@ def hyperparam_task(dataset, k, n, seed):
     plot_dict(times, 'Execution time', file_name=file_name)
     plot_dict(accuracies, 'Accuracy', file_name=file_name)
 
-    # TODO optimize the hyper parameters of ProdQuanNN and produce plot
-
 def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters ):
-    # times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters = args
+    """
+    A wrapper providing the same functionality as hyperparam_task
+    to be used to conduct experiments using multiple cores (multiprocessing)
+    """
     logger = logging.getLogger()
 
     print(f'Using {npartitions} partitions and {nclusters} clusters... ')
     start_time = time()
-    try:  # TODO fix this: this fails when n is not sufficiently large
+    try:
         pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
         elapsed_time = time() - start_time
     except ValueError as e:
@@ -316,9 +281,15 @@ def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample
         logger.warning(f'Error while saving results: {e}')
     return times, accuracies
 
-
-
 def plot_dict(d, ylabel, file_name=None, base=2):
+    """
+    Plot the results provided in a dictionary object
+
+    :param d: the experiment results to be plottted
+    :param ylabel: the label to give to the y axis
+    :param file_name: the name of the file to which the plot will be saved
+    :param base: the base for the logarithmic axes
+    """
     _, ax = plt.subplots()
     for npartitions in d.keys():
         ax.plot(list(d[npartitions].keys())[:], list(d[npartitions].values())[:], label=f'{npartitions} partitions')
@@ -336,6 +307,13 @@ def plot_dict(d, ylabel, file_name=None, base=2):
         logging.getLogger('plotter').warning(e)
 
 def save_results(times, accuracies, file_name):
+    """
+    Save the experiment results to a file
+
+    :param times: the execution times obtained by an experiment
+    :param accuracies: the accuracies obtained by an experiment
+    :param file_name: the file name of the file to which the data will be saved
+    """
     if isinstance(times, multiprocessing.managers.DictProxy):
         times = dict(times)
     if isinstance(accuracies, multiprocessing.managers.DictProxy):
