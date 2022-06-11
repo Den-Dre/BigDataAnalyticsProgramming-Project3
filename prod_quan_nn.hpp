@@ -174,22 +174,18 @@ namespace bdap {
 
         static float distanceToCentroid(const float *example, const Partition &partition, const float* centroid);
 
-        void calculateDistancesToCentroids(const pydata<float>& examples,
-                                           const float* example,
+        void calculateDistancesToCentroids(const float* example,
                                            std::vector<std::vector<float>>& distances) const;
 
         void getDistancesToExample(const pydata<float> &examples,
                                    const std::vector<std::vector<float>> &distancesToCentroids,
-                                   std::vector<std::tuple<float, int>> &distances) const;
+                                   std::priority_queue<std::tuple<float, int>> &distances,
+                                   int k) const;
 
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
 
         static void printTupleVector(const std::vector<std::tuple<float, int>>& distances) ;
 
-        void getDistancesToExample2(const pydata<float> &examples,
-                                    const std::vector<std::vector<float>> &distancesToCentroids,
-                                    std::priority_queue<std::tuple<float, int>> &distances,
-                                    int k) const;
     };
 
 
