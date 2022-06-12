@@ -43,7 +43,7 @@ namespace bdap {
      * based on the following:
      *  - As sqrt is a monotone function, this doesn't change the relative ordering of the neighbors
      *  - This ensures that the same distance metrics are compared when calculating the Mean Absolute Error
-     *    in `functions.py`
+     *    in `functions.py`, rather than comparing for example squared distances to regular distances of sknn
      *  - The extra percentual relative overhead of calculating `nneighbors` square root operations
      *    is negligable, which ensures that this modification doesn't hurt the perofrmance of the
      *    Product Quantization implementation
@@ -69,9 +69,10 @@ namespace bdap {
             // https://mccormickml.com/2017/10/13/product-quantizer-tutorial-part-1/
             // "First, we’re going to calculate the squared L2 distance between each subsection of
             // our vector and each of the `nclusters` centroids for that subsection."
-            // Get the distances of `example` to each centroid within each of its partitions
+            // Get the distances of `example` to each centroid within each of its partitions:
             calculateDistancesToCentroids(example, distancesToCentroids);
 
+            // https://mccormickml.com/2017/10/13/product-quantizer-tutorial-part-1/
             // "Remember that each database vector is now just a sequence of `npartitions` centroid ids.
             // To calculate the approximate distance between a given database vector and the query vector,
             // we just use those centroid ids (labels in our case) to look up the partial distances
@@ -79,7 +80,9 @@ namespace bdap {
             getDistancesToExample(examples, distancesToCentroids, distancesToExample, nneighbors);
 
             // Only partially sorting `distancesToExamples` suffices to obtain the smallest `nneighbors` entries
-            partial_sort(distancesToExample.begin(), distancesToExample.begin() + nneighbors, distancesToExample.end());
+            partial_sort(distancesToExample.begin(),
+                         distancesToExample.begin() + nneighbors,
+                         distancesToExample.end());
 
             for (int j = 0; j < nneighbors; j++) {
                 // Store the Euclidean distances, not the squared Euclidean distances
@@ -93,6 +96,10 @@ namespace bdap {
      * Calculate the L2 norm (Euclidean distance) between the given `example` and `centroid`
      * based on their features in `partition`.
      *
+     * @param example The example from which to calculate the distance
+     * @param partition The partiton to which `centroid` belongs
+     * @param centroid The centroid form which to calculate the distance
+     * @return distance: The distance between `example` and `centroid` based on `partition`'s features
      */
     float ProdQuanNN::distanceToCentroid(const float* example, const Partition& partition, const float* centroid) {
         float distance = 0.0f;
@@ -143,47 +150,5 @@ namespace bdap {
             }
             res.at(t) = make_tuple(distanceAcc, t);
         }
-    }
-
-    // ----------------------------------
-    // Utilitarian and debugging methods
-    // ----------------------------------
-
-    // Print a nested `vector` in human readable form to `cout`
-    void ProdQuanNN::print2DVector(const std::vector<std::vector<double>>& distances) {
-        for (auto & distance : distances) {
-            for (double value : distance) {
-                cout << value << ", ";
-            }
-            cout << "\n";
-        }
-        cout << "\n";
-    }
-
-    // Print a `vector` containing `tuple`s to `cout` in human readable form
-    void ProdQuanNN::printTupleVector(const std::vector<std::tuple<float, int>>& distances) {
-        for (auto & tup : distances) {
-            cout << "<" << get<0>(tup) << ", " << get<1>(tup) << "> ";
-        }
-        cout << "\n";
-    }
-
-    // Print a `vector` to `cout` in human radable form
-    void ProdQuanNN::print_vector(const float *ptr, const pydata<float>& examples, const int nneighbors) {
-        std::cout << "Compute the " << nneighbors << " nearest neighbors for the "
-                  << examples.nrows
-                  << " given examples." << std::endl
-
-                  << "The examples are given in C-style row-major order, that is," << std::endl
-                  << "the values of a row are consecutive in memory." << std::endl
-
-                  << "The 5th example can be fetched as follows:" << std::endl;
-        std::cout << '[';
-        for (size_t i = 0; i < examples.ncols; ++i) {
-            if (i>0) std::cout << ",";
-            if (i>0 && i%5==0) std::cout << std::endl << ' ';
-            printf("%11f", ptr[i]);
-        }
-        std::cout << " ]" << std::endl;
     }
 } // namespace bdap

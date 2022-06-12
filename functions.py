@@ -21,7 +21,7 @@ from time import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from numpy import float32, sqrt
+from numpy import float32
 
 import util
 
@@ -30,8 +30,8 @@ CHOSEN_HYPERPARAMS = {
     'spambase': (16, 16),
     'covtype': (16, 32),
     'emnist_orig': (16, 32),
-    'emnist': (16, 32),
-    'higgs': (8, 64),
+    'emnist': (64, 64),
+    'higgs': (32, 32),
 }
 
 def numpy_nn_get_neighbors(xtrain, xtest, k):
@@ -45,17 +45,15 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
     indices = np.zeros((xtest.shape[0], k), dtype=int)
     distances = np.zeros((xtest.shape[0], k), dtype=float)
-    # Squared L2 norm: https://stackoverflow.com/a/35213951
-    sqeuclidean = lambda x: np.inner(x, x)
 
     for row_idx, test_vector in enumerate(xtest):
-        pq = []                                  # Initialize an empty min-heap priority queue
-                                                 # (heapq is part of python's standard library)
+        # Initialize an empty min-heap priority queue (heapq is part of python's standard library):
+        pq = []
         for i, train_vector in enumerate(xtrain):
             # Leverage on BLAS routines by using `np.linalg.norm` which uses BLAS-enhanced `np.dot`
             # we could only calculate the squared Euclidean distance here, ommitting the square root
-            # operation. It turns out that using `np.linalg.norm` is more efficient than calculating
-            # the squared Euclidean distance without leveraging the BLAS, and also more efficient than
+            # operation. It turns out that using `np.linalg.norm` is more efficient than (1) calculating
+            # the squared Euclidean distnace which doesn't leverage on BLAS, and (2) also more efficient than
             # calculating `np.linalg.norm(.)**2` or `np.power(np.linalg.norm(.), 2)`.
             distance = np.linalg.norm(test_vector - train_vector)
             if len(pq) < k:
@@ -91,7 +89,7 @@ def time_and_accuracy_task(dataset, k, n, seed):
     xtrain, xtest, ytrain, ytest = util.load_dataset(dataset)
     xsample, ysample = util.sample_xtest(xtest, ytest, n, seed)
     npartitions, nclusters = CHOSEN_HYPERPARAMS[dataset]
-    nns = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=True, npartitions=npartitions, nclusters=nclusters)
+    nns = util.get_nn_instances(dataset, xtrain, ytrain, cache_partitions=False, npartitions=npartitions, nclusters=nclusters)
 
     accuracies = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
     times = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
@@ -162,7 +160,7 @@ def retrieval_task(dataset, k, n, seed):
         if distances_sknn[ti_idx][0] in seen_neighbors:
             continue
 
-        # calculate the *exact* distances of the k-NN returned by pqnn
+        # Calculate the *exact* distances of the k-NN returned by pqnn
         exact_pqnn_distances = np.array([np.linalg.norm(np.subtract(ti, xtrain[i])) for i in indices_pqnn[ti_idx]], dtype=float32)
         min_diff = min(np.abs(np.subtract(exact_pqnn_distances, distances_sknn[ti_idx][0])))
         unique_distances += 1
@@ -174,7 +172,6 @@ def retrieval_task(dataset, k, n, seed):
             seen_neighbors.append(distances_sknn[ti_idx][0])
             retrieval_rate += 1
 
-    print(f'total: {indices_pqnn.shape[0]=}, {unique_distances=}, {retrieval_rate=}')
     retrieval_rate /= unique_distances
     return retrieval_rate
 
@@ -203,6 +200,8 @@ def hyperparam_task(dataset, k, n, seed):
     print(f'Nb. of examples: {nexamples}')
     print(f'Nb. of features: {nfeatures}')
 
+    # Choose exponentially growing values to perform a grid search on
+    # a wide range of possible hyperparameter value combinations:
     npartitions_vals = [pow(base,x) for x in range(ceil(log(nfeatures, base)))]
     nclusters_vals = [pow(base,x) for x in range(ceil(log(nexamples, base))) if x < pow(base, x) < 10000]
 
@@ -239,7 +238,7 @@ def hyperparam_task(dataset, k, n, seed):
             except Exception as e:
                 logger.warning(f'Error while saving results: {e}')
 
-    # save and plot results
+    # Save and plot results
     print('Results of times:')
     print(times)
     print('Results of accuracies:')
@@ -247,43 +246,6 @@ def hyperparam_task(dataset, k, n, seed):
     save_results(times, accuracies, file_name)
     plot_dict(times, 'Execution time', file_name=file_name)
     plot_dict(accuracies, 'Accuracy', file_name=file_name)
-
-def run_parallel_experiments(times, accuracies, dataset, xtrain, ytrain, xsample, ysample, k, file_name, npartitions, nclusters ):
-    """
-    A wrapper providing the same functionality as hyperparam_task
-    to be used to conduct experiments using multiple cores (multiprocessing)
-    """
-    logger = logging.getLogger()
-
-    print(f'Using {npartitions} partitions and {nclusters} clusters... ')
-    start_time = time()
-    try:
-        pqnn, _, _ = util.get_nn_instances(dataset, xtrain, ytrain, npartitions=npartitions, nclusters=nclusters)
-        elapsed_time = time() - start_time
-    except ValueError as e:
-        logger.warning(f'{npartitions} partitions and {nclusters} clusters gave error: {e}')
-        return
-
-    indices, _ = pqnn.get_neighbors(xsample, k)
-    predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
-
-    print(f'For {npartitions, nclusters} if test returns {npartitions in dict(times).keys()} with dict: {dict(times)}')
-    if npartitions in dict(times).keys():
-        tmp = times[npartitions]
-        tmp[nclusters] = elapsed_time
-        times[npartitions] = tmp
-
-        tmp = accuracies[npartitions]
-        tmp[nclusters] = compute_accuracy(ysample, predicted_labels)
-        accuracies[npartitions] = tmp
-    else:
-        times[npartitions] = {nclusters: elapsed_time}
-        accuracies[npartitions] = {nclusters: compute_accuracy(ysample, predicted_labels)}
-    try:
-        save_results(times, accuracies, file_name)
-    except Exception as e:
-        logger.warning(f'Error while saving results: {e}')
-    return times, accuracies
 
 def plot_dict(d, ylabel, file_name=None, base=2):
     """

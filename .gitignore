@@ -9,3 +9,7 @@ test_data.py
 
 # Don't add pycache
 __pycache__/
+
+# Don't add build files
+build/
+cmake-build-debug/

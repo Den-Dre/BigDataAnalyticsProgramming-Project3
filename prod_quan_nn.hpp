@@ -86,9 +86,6 @@ namespace bdap {
         //
         // ========================================================================
 
-//        std::vector<std::vector<float>> distancesToCentroids;
-//        std::vector<std::tuple<float, int>> distancesToExample;
-
     public:
         /**
          * Constructor. Implemented for you in 'prod_quan_nn.cpp'.
@@ -170,22 +167,41 @@ namespace bdap {
         // Implement them in 'prod_quan_nn.cpp'
         //
         // ========================================================================
-        static void print_vector(const float *example_ptr, const pydata<float>& examples, int nneighbors) ;
 
+        /**
+         * Calculate the L2 norm (Euclidean distance) between the given `example` and `centroid`
+         * based on their features in `partition`.
+         *
+         * @param example The example from which to calculate the distance
+         * @param partition The partiton to which `centroid` belongs
+         * @param centroid The centroid form which to calculate the distance
+         * @return distance: The distance between `example` and `centroid` based on `partition`'s features
+         */
         static float distanceToCentroid(const float *example, const Partition &partition, const float* centroid);
 
+        /**
+         * Writes to the vector `distances`, s.t. distances[p][c] is the distance of
+         * training example `example` to the centroid of cluster `c` in partition `p`
+         *
+         * @param example: the test example from which the distances to the centroids will be calculated
+         * @param distances: the output argument to which the distances will be written
+         */
         void calculateDistancesToCentroids(const float* example,
                                            std::vector<std::vector<float>>& distances) const;
 
+        /**
+         * Updates Priority Queue `queue` to contain the approximate `k` nearest neighbors' sorted distances
+         * for each training example in `examples`
+         *
+         * @param examples: the training examples
+         * @param distancesToCentroids: the distances to each centroid of each partition from the current test example
+         * @param queue: output argument priority queue to which the nearest `k` neighbors' sorted distances will be written
+         * @param k: the number of neighbors, i.e.: k from kNN
+         */
         void getDistancesToExample(const pydata<float> &examples,
                                    const std::vector<std::vector<float>> &distancesToCentroids,
                                    std::vector<std::tuple<float, int>> &distances,
                                    int k) const;
-
-        static void print2DVector(const std::vector<std::vector<double>>& distances) ;
-
-        static void printTupleVector(const std::vector<std::tuple<float, int>>& distances) ;
-
     };
 
 
