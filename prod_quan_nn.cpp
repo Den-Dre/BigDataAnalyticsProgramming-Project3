@@ -76,17 +76,15 @@ namespace bdap {
             // To calculate the approximate distance between a given database vector and the query vector,
             // we just use those centroid ids (labels in our case) to look up the partial distances
             // in the table, and sum those up!"
-            priority_queue<tuple<float, int>> queue;
-            getDistancesToExample(examples, distancesToCentroids, queue, nneighbors);
+            getDistancesToExample(examples, distancesToCentroids, distancesToExample, nneighbors);
 
-            // Update the output pointers by sequentially popping the
-            // top `nneighbors` entries of the priority queue
-            for (int j = nneighbors-1; j >= 0; j--) {
-                tuple<float, int> top = queue.top();
+            // Only partially sorting `distancesToExamples` suffices to obtain the smallest `nneighbors` entries
+            partial_sort(distancesToExample.begin(), distancesToExample.begin() + nneighbors, distancesToExample.end());
+
+            for (int j = 0; j < nneighbors; j++) {
                 // Store the Euclidean distances, not the squared Euclidean distances
-                *out_distance.ptr_mut(i, j) = sqrt(get<0>(top));
-                *out_index.ptr_mut(i, j) = get<1>(top);
-                queue.pop();
+                *out_distance.ptr_mut(i, j) = sqrt(get<0>(distancesToExample.at(j)));
+                *out_index.ptr_mut(i, j) = get<1>(distancesToExample.at(j));
             }
         }
     }
@@ -101,7 +99,6 @@ namespace bdap {
         for (int fIdx = partition.feat_begin; fIdx < partition.feat_end; fIdx++) {
             distance += powf(example[fIdx] - centroid[fIdx-partition.feat_begin], 2);
         }
-//        return sqrt(distance);
         return distance;
     }
 
@@ -134,7 +131,7 @@ namespace bdap {
      */
     void ProdQuanNN::getDistancesToExample(const pydata<float> &examples,
                                            const std::vector<std::vector<float>> &distancesToCentroids,
-                                           std::priority_queue<std::tuple<float, int>>& queue,
+                                           std::vector<std::tuple<float, int>>& res,
                                            const int k) const {
         // For each training example...
         for (size_t t = 0; t < this->ntrain_examples(); t++) {
@@ -144,11 +141,7 @@ namespace bdap {
                 // Use the `at` operator to enforce bounds checking:
                 distanceAcc += distancesToCentroids.at(p).at(closestCentroid);
             }
-            // Store the Euclidean distance (!= squared Euclidean distance)
-            queue.push(make_tuple(distanceAcc, t));
-            if (queue.size() > (size_t) k) {
-                queue.pop();
-            }
+            res.at(t) = make_tuple(distanceAcc, t);
         }
     }
 

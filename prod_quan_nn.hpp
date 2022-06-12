@@ -179,7 +179,7 @@ namespace bdap {
 
         void getDistancesToExample(const pydata<float> &examples,
                                    const std::vector<std::vector<float>> &distancesToCentroids,
-                                   std::priority_queue<std::tuple<float, int>> &distances,
+                                   std::vector<std::tuple<float, int>> &distances,
                                    int k) const;
 
         static void print2DVector(const std::vector<std::vector<double>>& distances) ;
