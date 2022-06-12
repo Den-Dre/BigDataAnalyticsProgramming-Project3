@@ -6,9 +6,10 @@
 #                  TODO: Implement the functions in this file                 #
 #                                                                             #
 ###############################################################################
+
+# All imports below are from python's standard library
 import logging
 import multiprocessing.managers
-import pickle
 import sys
 from heapq import heappush, heapreplace, nlargest
 from math import log, ceil
@@ -20,7 +21,7 @@ from time import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from numpy import float32
+from numpy import float32, sqrt
 
 import util
 
@@ -44,20 +45,27 @@ def numpy_nn_get_neighbors(xtrain, xtest, k):
     """
     indices = np.zeros((xtest.shape[0], k), dtype=int)
     distances = np.zeros((xtest.shape[0], k), dtype=float)
+    # Squared L2 norm: https://stackoverflow.com/a/35213951
+    sqeuclidean = lambda x: np.inner(x, x)
 
     for row_idx, test_vector in enumerate(xtest):
-        pq = []
+        pq = []                                  # Initialize an empty min-heap priority queue
+                                                 # (heapq is part of python's standard library)
         for i, train_vector in enumerate(xtrain):
+            # Leverage on BLAS routines by using `np.linalg.norm` which uses BLAS-enhanced `np.dot`
+            # we could only calculate the squared Euclidean distance here, ommitting the square root
+            # operation. It turns out that using `np.linalg.norm` is more efficient than calculating
+            # the squared Euclidean distance without leveraging the BLAS, and also more efficient than
+            # calculating `np.linalg.norm(.)**2` or `np.power(np.linalg.norm(.), 2)`.
             distance = np.linalg.norm(test_vector - train_vector)
             if len(pq) < k:
                 heappush(pq, (-distance, i))     # Add negative distance to sort pq by least distance (heapq is a min-heap)
-            elif distance < -pq[0][0]:           # current is smaller than current largest distance (= minimum element of pq)
-                heapreplace(pq, (-distance, i))  # pop pq[0] (minimum value) and push xtest[i]
-        for idx, (neg_distance, i) in enumerate(nlargest(k, pq, key=lambda x: x[0])):
+            elif distance < -pq[0][0]:           # I.e. `distance` is smaller than current largest distance (= minimum element of pq)
+                heapreplace(pq, (-distance, i))  # Pop pq[0] (minimum value) and push xtest[i]
+        for idx, (neg_distance, i) in enumerate(nlargest(k, pq)):
             indices[row_idx][idx] = i
             distances[row_idx][idx] = -neg_distance
     return indices, distances
-
 
 def compute_accuracy(ytrue, ypredicted):
     """
@@ -89,11 +97,8 @@ def time_and_accuracy_task(dataset, k, n, seed):
     times = {"pqnn": 0.0, "npnn": 0.0, "sknn": 0.0}
 
     for nn, str_nn in zip(nns, times.keys()):
-        if str_nn == "pqnn": continue
         start_time = time()
         indices, dist = nn.get_neighbors(xsample, k)
-        print(f'{str_nn} neighbors: {indices}')
-        print(f'{str_nn} distances: {dist}')
         times[str_nn] = time() - start_time  # Measure prediction time
 
         predicted_labels = [[ytrain[n_idx] for n_idx in indices_row] for indices_row in indices]
@@ -118,7 +123,6 @@ def distance_absolute_error_task(dataset, k, n, seed):
     _, distances_pqnn = pqnn.get_neighbors(xsample, k=k)
     _, distances_sknn = sknn.get_neighbors(xsample, k=k)
 
-    # mean_abs_dist = np.sum(np.absolute(distances_sknn - distances_pqnn)) / distances_pqnn.size
     mean_abs_dist = np.mean(np.absolute(distances_sknn - distances_pqnn))
 
     return mean_abs_dist
